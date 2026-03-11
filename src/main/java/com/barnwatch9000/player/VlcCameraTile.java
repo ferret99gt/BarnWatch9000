@@ -221,13 +221,14 @@ public final class VlcCameraTile extends StackPane
                         "--quiet",
                         "--no-video-title-show",
                         "--rtsp-tcp",
-                        "--network-caching=2000",
+                        "--network-caching=3000",
                         "--no-audio",
                         "--no-drop-late-frames",
                         "--no-skip-frames",
-                        "--rtsp-frame-buffer-size=1000000",
+                        "--rtsp-frame-buffer-size=5000000",
                         "--clock-jitter=0",
-                        "--clock-synchro=0");
+                        "--clock-synchro=0",
+                        "--avcodec-hw=any");
             }
 
             JPanel panel = new JPanel(new BorderLayout());
