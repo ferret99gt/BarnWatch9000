@@ -765,9 +765,13 @@ public final class BarnWatch9000App extends Application
         GridLayoutPreset layout = layoutSelect.getValue();
         int startIndex = currentPage * layout.capacity();
         java.util.Map<String, VlcCameraTile> tilesById = new java.util.HashMap<>();
+        java.util.Map<String, Integer> previousColumnSpans = new java.util.HashMap<>();
+        java.util.Map<String, Integer> previousRowSpans = new java.util.HashMap<>();
         for (VlcCameraTile tile : activeTiles)
         {
             tilesById.put(tile.device().id(), tile);
+            previousColumnSpans.put(tile.device().id(), gridSpan(GridPane.getColumnSpan(tile)));
+            previousRowSpans.put(tile.device().id(), gridSpan(GridPane.getRowSpan(tile)));
         }
 
         List<VlcCameraTile> newVisibleTiles = new ArrayList<>();
@@ -783,7 +787,9 @@ public final class BarnWatch9000App extends Application
             {
                 CameraDevice device = devices.get(deviceIndex);
                 VlcCameraTile tile = tilesById.get(device.id());
-                if (tile != null)
+                if (tile != null
+                        && previousColumnSpans.getOrDefault(device.id(), 1) == placement.columnSpan()
+                        && previousRowSpans.getOrDefault(device.id(), 1) == placement.rowSpan())
                 {
                     configureTileInteractions(tile, deviceIndex, true, event -> {
                         if (event.getClickCount() == 2)
@@ -799,6 +805,10 @@ public final class BarnWatch9000App extends Application
                 }
                 else
                 {
+                    if (tile != null)
+                    {
+                        tile.dispose();
+                    }
                     VlcCameraTile replacement = createGridTile(device, deviceIndex);
                     wallGrid.add(replacement, column, row, placement.columnSpan(), placement.rowSpan());
                     GridPane.setHgrow(replacement, Priority.ALWAYS);
@@ -820,6 +830,11 @@ public final class BarnWatch9000App extends Application
         nextPageButton.setDisable(currentPage >= totalPages(layout) - 1);
         pageLabel.setText("Page " + (currentPage + 1) + " / " + totalPages(layout));
         statusLabel.setText(buildStatus(layout.toString(), false));
+    }
+
+    private static int gridSpan(Integer span)
+    {
+        return span == null ? 1 : span;
     }
 
     private int totalPages(GridLayoutPreset layout)
