@@ -537,6 +537,7 @@ public final class BarnWatch9000App extends Application
 
     public static void main(String[] args)
     {
+        AppLog.installGlobalHandler();
         launch(args);
     }
 
@@ -773,6 +774,7 @@ public final class BarnWatch9000App extends Application
 
         List<VlcCameraTile> newVisibleTiles = new ArrayList<>();
         wallGrid.getChildren().clear();
+        slotTargets.clear();
         for (int slot = 0; slot < layout.placements().size(); slot++)
         {
             GridLayoutPreset.TilePlacement placement = layout.placements().get(slot);

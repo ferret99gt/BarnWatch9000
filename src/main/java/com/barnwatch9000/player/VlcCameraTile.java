@@ -1,10 +1,11 @@
 package com.barnwatch9000.player;
 
+import com.barnwatch9000.AppLog;
 import com.barnwatch9000.model.CameraDevice;
+import javafx.application.Platform;
 import javafx.embed.swing.SwingNode;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.application.Platform;
 import javafx.scene.control.Label;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
@@ -18,6 +19,7 @@ import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.event.HierarchyEvent;
+import java.awt.event.HierarchyListener;
 
 public final class VlcCameraTile extends StackPane
 {
@@ -27,6 +29,8 @@ public final class VlcCameraTile extends StackPane
     private final Region inputLayer = new Region();
     private final Object playerLock = new Object();
     private CallbackMediaPlayerComponent mediaPlayerComponent;
+    private JPanel playerPanel;
+    private HierarchyListener playerHierarchyListener;
     private boolean disposed;
     private boolean playbackStarted;
     private double zoomFactor = 1.0;
@@ -121,30 +125,48 @@ public final class VlcCameraTile extends StackPane
 
     public void dispose()
     {
+        CallbackMediaPlayerComponent componentToRelease;
+        JPanel panelToClear;
+        HierarchyListener hierarchyListenerToRemove;
         synchronized (playerLock)
         {
             disposed = true;
+            playbackStarted = false;
+            componentToRelease = mediaPlayerComponent;
+            mediaPlayerComponent = null;
+            panelToClear = playerPanel;
+            hierarchyListenerToRemove = playerHierarchyListener;
+            playerPanel = null;
+            playerHierarchyListener = null;
         }
 
-        SwingUtilities.invokeLater(() -> {
-            CallbackMediaPlayerComponent componentToRelease;
-            synchronized (playerLock)
-            {
-                componentToRelease = mediaPlayerComponent;
-                mediaPlayerComponent = null;
-            }
+        Platform.runLater(() -> {
+            swingNode.setContent(null);
+            getChildren().removeIf(node -> node instanceof Label label && "VLC not found".equals(label.getText()));
 
-            if (componentToRelease != null)
-            {
-                try
+            SwingUtilities.invokeLater(() -> {
+                if (panelToClear != null)
                 {
-                    componentToRelease.mediaPlayer().controls().stop();
+                    if (hierarchyListenerToRemove != null)
+                    {
+                        panelToClear.removeHierarchyListener(hierarchyListenerToRemove);
+                    }
+                    panelToClear.removeAll();
                 }
-                catch (RuntimeException ignored)
+
+                if (componentToRelease != null)
                 {
+                    try
+                    {
+                        componentToRelease.mediaPlayer().controls().stop();
+                    }
+                    catch (RuntimeException ex)
+                    {
+                        AppLog.error("Failed to stop VLC player during tile disposal for " + device.name(), ex);
+                    }
+                    componentToRelease.release();
                 }
-                componentToRelease.release();
-            }
+            });
         });
     }
 
@@ -201,10 +223,23 @@ public final class VlcCameraTile extends StackPane
             {
                 component.mediaPlayer().controls().stop();
             }
-            catch (RuntimeException ignored)
+            catch (RuntimeException ex)
             {
+                AppLog.error("Failed to stop VLC player during reconnect for " + device.name(), ex);
             }
-            component.mediaPlayer().media().play(device.streamUrl(mainStream), device.vlcOptions());
+
+            try
+            {
+                component.mediaPlayer().media().play(device.streamUrl(mainStream), device.vlcOptions());
+            }
+            catch (RuntimeException ex)
+            {
+                synchronized (playerLock)
+                {
+                    playbackStarted = false;
+                }
+                AppLog.error("Failed to reconnect stream for " + device.name(), ex);
+            }
         });
     }
 
@@ -233,13 +268,28 @@ public final class VlcCameraTile extends StackPane
 
             JPanel panel = new JPanel(new BorderLayout());
             panel.add(mediaPlayerComponent, BorderLayout.CENTER);
-            panel.addHierarchyListener(event -> {
+            HierarchyListener hierarchyListener = event -> {
                 long flags = event.getChangeFlags();
                 if ((flags & HierarchyEvent.DISPLAYABILITY_CHANGED) != 0 || (flags & HierarchyEvent.SHOWING_CHANGED) != 0)
                 {
                     startPlaybackIfReady(panel);
                 }
-            });
+            };
+            panel.addHierarchyListener(hierarchyListener);
+
+            synchronized (playerLock)
+            {
+                if (disposed)
+                {
+                    panel.removeHierarchyListener(hierarchyListener);
+                    panel.removeAll();
+                    mediaPlayerComponent.release();
+                    mediaPlayerComponent = null;
+                    return;
+                }
+                playerPanel = panel;
+                playerHierarchyListener = hierarchyListener;
+            }
 
             Platform.runLater(() -> {
                 synchronized (playerLock)
@@ -281,7 +331,7 @@ public final class VlcCameraTile extends StackPane
             {
                 playbackStarted = false;
             }
-            throw ex;
+            AppLog.error("Failed to start playback for " + device.name(), ex);
         }
     }
 
