@@ -127,7 +127,9 @@ public final class BarnWatch9000App extends Application
                 GridLayoutPreset.NINE,
                 GridLayoutPreset.SIX_TALL,
                 GridLayoutPreset.SIX_WIDE,
+                GridLayoutPreset.THREE_OVER_FOUR,
                 GridLayoutPreset.BIG_SIX,
+                GridLayoutPreset.BIG_SEVEN,
                 GridLayoutPreset.BIG_EIGHT);
         layoutSelect.setValue(initialLayout);
         previousLayout = initialLayout;
@@ -579,8 +581,6 @@ public final class BarnWatch9000App extends Application
         }
 
         theaterMode = true;
-        controlsBar.setVisible(false);
-        controlsBar.setManaged(false);
 
         primaryStage.hide();
         primaryStage.setScene(null);
@@ -615,8 +615,6 @@ public final class BarnWatch9000App extends Application
         }
 
         primaryStage.setScene(appScene);
-        controlsBar.setVisible(true);
-        controlsBar.setManaged(true);
         primaryStage.show();
         primaryStage.setX(windowedX);
        primaryStage.setY(windowedY);

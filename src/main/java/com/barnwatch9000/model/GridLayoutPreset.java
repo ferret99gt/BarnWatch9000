@@ -12,6 +12,14 @@ public enum GridLayoutPreset
     NINE("3x3", 3, 3, uniformPlacements(3, 3)),
     SIX_TALL("3x2", 2, 3, uniformPlacements(2, 3)),
     SIX_WIDE("2x3", 3, 2, uniformPlacements(3, 2)),
+    THREE_OVER_FOUR("3 over 4", 12, 2, List.of(
+            new TilePlacement(0, 0, 4, 1),
+            new TilePlacement(4, 0, 4, 1),
+            new TilePlacement(8, 0, 4, 1),
+            new TilePlacement(0, 1, 3, 1),
+            new TilePlacement(3, 1, 3, 1),
+            new TilePlacement(6, 1, 3, 1),
+            new TilePlacement(9, 1, 3, 1))),
     BIG_SIX("Big 6", 3, 3, List.of(
             new TilePlacement(0, 0, 2, 2),
             new TilePlacement(2, 0, 1, 1),
@@ -19,6 +27,14 @@ public enum GridLayoutPreset
             new TilePlacement(0, 2, 1, 1),
             new TilePlacement(1, 2, 1, 1),
             new TilePlacement(2, 2, 1, 1))),
+    BIG_SEVEN("Big 7", 4, 3, List.of(
+            new TilePlacement(0, 0, 3, 2),
+            new TilePlacement(3, 0, 1, 1),
+            new TilePlacement(3, 1, 1, 1),
+            new TilePlacement(0, 2, 1, 1),
+            new TilePlacement(1, 2, 1, 1),
+            new TilePlacement(2, 2, 1, 1),
+            new TilePlacement(3, 2, 1, 1))),
     BIG_EIGHT("Big 8", 4, 4, List.of(
             new TilePlacement(0, 0, 3, 3),
             new TilePlacement(3, 0, 1, 1),

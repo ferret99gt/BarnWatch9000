@@ -7,14 +7,7 @@ Lightweight JavaFX RTSP wall viewer for barn cameras. Developed with assistence 
 - SQLite-backed camera device list
 - SQLite-backed app settings for persisted grid selection
 - Arbitrary wall viewing with substream grid mode and mainstream focus mode
-- Layout presets:
-  - `1x1`
-  - `2x2`
-  - `3x3`
-  - `3x2`
-  - `2x3`
-  - `Big 6`
-  - `Big 8`
+- Multiple grid views, including equal-tile and emphasis layouts
 - Paging for layouts with fewer visible slots than configured cameras
 - Double-click a tile to focus a single camera
 - Theater mode that fills the selected display without relying on JavaFX fullscreen
