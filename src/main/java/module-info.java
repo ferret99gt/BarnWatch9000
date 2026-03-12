@@ -1,6 +1,7 @@
 module com.barnwatch9000
 {
     requires java.desktop;
+    requires java.net.http;
     requires java.sql;
 
     requires javafx.controls;

@@ -175,6 +175,7 @@
               </modulePaths>
               <addModules>
                 <module>java.desktop</module>
+                <module>java.net.http</module>
                 <module>java.sql</module>
                 <module>javafx.base</module>
                 <module>javafx.controls</module>

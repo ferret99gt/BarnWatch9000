@@ -12,6 +12,8 @@ public record CameraDevice(
         String password,
         String subPath,
         String mainPath,
+        boolean ptzCapable,
+        boolean opticalZoomCapable,
         int sortOrder)
 {
     public String streamUrl(boolean mainStream)
@@ -38,7 +40,12 @@ public record CameraDevice(
 
     public CameraDevice withSortOrder(int newSortOrder)
     {
-        return new CameraDevice(id, name, host, port, username, password, subPath, mainPath, newSortOrder);
+        return new CameraDevice(id, name, host, port, username, password, subPath, mainPath, ptzCapable, opticalZoomCapable, newSortOrder);
+    }
+
+    public String controlBaseUrl()
+    {
+        return "http://" + host.trim() + ":" + port + "/cgi-bin/CGIProxy.fcgi";
     }
 
     private static String sanitizePath(String raw)

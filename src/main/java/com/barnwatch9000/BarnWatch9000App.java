@@ -7,6 +7,7 @@ import com.barnwatch9000.model.CameraDevice;
 import com.barnwatch9000.model.GridLayoutPreset;
 import com.barnwatch9000.player.VlcCameraTile;
 import com.barnwatch9000.player.VlcSupport;
+import com.barnwatch9000.ptz.FoscamPtzController;
 import com.barnwatch9000.ui.DeviceManagerDialog;
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -64,6 +65,12 @@ public final class BarnWatch9000App extends Application
     private Button previousPageButton;
     private Button nextPageButton;
     private Button backToGridButton;
+    private ComboBox<String> ptzPresetSelect;
+    private Button ptzGoButton;
+    private Button ptzResetButton;
+    private Label ptzZoomLabel;
+    private Button ptzZoomOutButton;
+    private Button ptzZoomInButton;
     private Label pageLabel;
     private Label statusLabel;
 
@@ -78,6 +85,7 @@ public final class BarnWatch9000App extends Application
     private double windowedHeight;
     private boolean windowedMaximized;
     private static final double DRAG_THRESHOLD = 6.0;
+    private static final double PTZ_DRAG_THRESHOLD = 18.0;
     private final Map<Integer, javafx.scene.Node> slotTargets = new HashMap<>();
 
     @Override
@@ -167,6 +175,63 @@ public final class BarnWatch9000App extends Application
         backToGridButton = new Button("Back To Grid");
         backToGridButton.setOnAction(event -> exitFocusMode());
 
+        ptzPresetSelect = new ComboBox<>();
+        ptzPresetSelect.setPrefWidth(180);
+        ptzPresetSelect.setPromptText("Preset");
+        ptzPresetSelect.setVisible(false);
+        ptzPresetSelect.setManaged(false);
+
+        ptzGoButton = new Button("Go");
+        ptzGoButton.setVisible(false);
+        ptzGoButton.setManaged(false);
+        ptzGoButton.disableProperty().bind(ptzPresetSelect.getSelectionModel().selectedItemProperty().isNull());
+        ptzGoButton.setOnAction(event -> {
+            if (focusedDevice == null)
+            {
+                return;
+            }
+            String preset = ptzPresetSelect.getValue();
+            if (preset != null && !preset.isBlank())
+            {
+                FoscamPtzController.goToPreset(focusedDevice, preset);
+            }
+        });
+
+        ptzResetButton = new Button("Reset");
+        ptzResetButton.setVisible(false);
+        ptzResetButton.setManaged(false);
+        ptzResetButton.setOnAction(event -> {
+            if (focusedDevice != null)
+            {
+                FoscamPtzController.reset(focusedDevice);
+            }
+        });
+
+        ptzZoomLabel = new Label("Zoom");
+        ptzZoomLabel.setStyle("-fx-text-fill: #d6d0c4; -fx-font-size: 13px;");
+        ptzZoomLabel.setVisible(false);
+        ptzZoomLabel.setManaged(false);
+
+        ptzZoomOutButton = new Button("-");
+        ptzZoomOutButton.setVisible(false);
+        ptzZoomOutButton.setManaged(false);
+        ptzZoomOutButton.setOnAction(event -> {
+            if (focusedDevice != null)
+            {
+                FoscamPtzController.zoom(focusedDevice, false);
+            }
+        });
+
+        ptzZoomInButton = new Button("+");
+        ptzZoomInButton.setVisible(false);
+        ptzZoomInButton.setManaged(false);
+        ptzZoomInButton.setOnAction(event -> {
+            if (focusedDevice != null)
+            {
+                FoscamPtzController.zoom(focusedDevice, true);
+            }
+        });
+
         Button fullscreenButton = new Button("Fullscreen");
         fullscreenButton.setOnAction(event -> toggleFullScreen());
 
@@ -180,6 +245,12 @@ public final class BarnWatch9000App extends Application
                 nextPageButton,
                 pageLabel,
                 backToGridButton,
+                ptzPresetSelect,
+                ptzGoButton,
+                ptzResetButton,
+                ptzZoomLabel,
+                ptzZoomOutButton,
+                ptzZoomInButton,
                 spacer(),
                 statusLabel,
                 fullscreenButton);
@@ -340,6 +411,7 @@ public final class BarnWatch9000App extends Application
         layoutSelect.setDisable(false);
         pageLabel.setText("Page " + (currentPage + 1) + " / " + totalPages);
         statusLabel.setText(buildStatus(layout.toString(), false));
+        hidePtzControls();
     }
 
     private void buildFocusedWall()
@@ -373,6 +445,7 @@ public final class BarnWatch9000App extends Application
         backToGridButton.setManaged(true);
         layoutSelect.setDisable(true);
         statusLabel.setText(buildStatus("1x1", true));
+        updatePtzControls();
     }
 
     private void enterFocusMode(CameraDevice device)
@@ -389,6 +462,63 @@ public final class BarnWatch9000App extends Application
         layoutSelect.setValue(previousLayout);
         currentPage = previousPage;
         refreshWall();
+    }
+
+    private void updatePtzControls()
+    {
+        if (focusedDevice == null || !focusedDevice.ptzCapable())
+        {
+            hidePtzControls();
+            return;
+        }
+
+        CameraDevice device = focusedDevice;
+        ptzPresetSelect.getItems().clear();
+        ptzPresetSelect.getSelectionModel().clearSelection();
+        ptzPresetSelect.setPromptText("Loading presets...");
+        ptzPresetSelect.setVisible(true);
+        ptzPresetSelect.setManaged(true);
+        ptzGoButton.setVisible(true);
+        ptzGoButton.setManaged(true);
+        ptzResetButton.setVisible(true);
+        ptzResetButton.setManaged(true);
+        boolean showOpticalZoom = focusedDevice.opticalZoomCapable();
+        ptzZoomLabel.setVisible(showOpticalZoom);
+        ptzZoomLabel.setManaged(showOpticalZoom);
+        ptzZoomOutButton.setVisible(showOpticalZoom);
+        ptzZoomOutButton.setManaged(showOpticalZoom);
+        ptzZoomInButton.setVisible(showOpticalZoom);
+        ptzZoomInButton.setManaged(showOpticalZoom);
+
+        FoscamPtzController.fetchPresets(device).thenAccept(presets -> Platform.runLater(() -> {
+            if (focusedDevice == null || !focusedDevice.id().equals(device.id()))
+            {
+                return;
+            }
+
+            ptzPresetSelect.getItems().setAll(presets);
+            ptzPresetSelect.getSelectionModel().clearSelection();
+            ptzPresetSelect.setPromptText(presets.isEmpty() ? "No presets" : "Preset");
+        }));
+    }
+
+    private void hidePtzControls()
+    {
+        ptzPresetSelect.getItems().clear();
+        ptzPresetSelect.getSelectionModel().clearSelection();
+        ptzPresetSelect.setPromptText("Preset");
+        ptzPresetSelect.setVisible(false);
+        ptzPresetSelect.setManaged(false);
+        ptzGoButton.setVisible(false);
+        ptzGoButton.setManaged(false);
+        ptzResetButton.setVisible(false);
+        ptzResetButton.setManaged(false);
+        ptzZoomLabel.setVisible(false);
+        ptzZoomLabel.setManaged(false);
+        ptzZoomOutButton.setVisible(false);
+        ptzZoomOutButton.setManaged(false);
+        ptzZoomInButton.setVisible(false);
+        ptzZoomInButton.setManaged(false);
     }
 
     private VlcCameraTile createGridTile(CameraDevice device, int globalIndex)
@@ -470,12 +600,11 @@ public final class BarnWatch9000App extends Application
 
     private String buildStatus(String layoutLabel, boolean focused)
     {
-        String discovery = VlcSupport.status();
         if (devices.isEmpty())
         {
-            return discovery + "  |  No devices configured";
+            return "No devices configured";
         }
-        return discovery + "  |  " + devices.size() + " devices  |  " + layoutLabel + (focused ? " main stream" : " sub streams");
+        return devices.size() + " devices  |  " + layoutLabel + (focused ? " main stream" : " sub streams");
     }
 
     private void releaseTiles()
@@ -671,6 +800,9 @@ public final class BarnWatch9000App extends Application
         final double[] pressSceneY = new double[1];
         final boolean[] panning = new boolean[1];
         final boolean[] swapArmed = new boolean[1];
+        final boolean[] ptzDragging = new boolean[1];
+        final FoscamPtzController.Direction[] activePtzDirection = {FoscamPtzController.Direction.NONE};
+        boolean focusedPtzEnabled = !reorderEnabled && tile.device().ptzCapable();
 
         layer.setOnMousePressed(event -> {
             if (event.getButton() == MouseButton.SECONDARY)
@@ -689,10 +821,17 @@ public final class BarnWatch9000App extends Application
             pressSceneX[0] = event.getSceneX();
             pressSceneY[0] = event.getSceneY();
             swapArmed[0] = false;
+            ptzDragging[0] = false;
+            activePtzDirection[0] = FoscamPtzController.Direction.NONE;
             if (tile.isZoomed())
             {
                 tile.beginPan(event.getSceneX(), event.getSceneY());
                 panning[0] = true;
+            }
+            else if (focusedPtzEnabled)
+            {
+                panning[0] = false;
+                ptzDragging[0] = true;
             }
             else
             {
@@ -718,6 +857,27 @@ public final class BarnWatch9000App extends Application
                 panning[0] = false;
             }
 
+            if (ptzDragging[0])
+            {
+                FoscamPtzController.Direction direction = resolvePtzDirection(
+                        event.getSceneX() - pressSceneX[0],
+                        event.getSceneY() - pressSceneY[0]);
+                if (direction != activePtzDirection[0])
+                {
+                    if (direction == FoscamPtzController.Direction.NONE)
+                    {
+                        FoscamPtzController.stop(tile.device());
+                    }
+                    else
+                    {
+                        FoscamPtzController.move(tile.device(), direction);
+                    }
+                    activePtzDirection[0] = direction;
+                }
+                event.consume();
+                return;
+            }
+
             if (!reorderEnabled || swapArmed[0])
             {
                 return;
@@ -738,6 +898,10 @@ public final class BarnWatch9000App extends Application
             {
                 tile.endPan();
             }
+            if (ptzDragging[0] && activePtzDirection[0] != FoscamPtzController.Direction.NONE)
+            {
+                FoscamPtzController.stop(tile.device());
+            }
             if (swapArmed[0] && reorderEnabled)
             {
                 Integer targetIndex = findTargetIndex(event.getSceneX(), event.getSceneY());
@@ -747,6 +911,8 @@ public final class BarnWatch9000App extends Application
                 }
             }
             panning[0] = false;
+            ptzDragging[0] = false;
+            activePtzDirection[0] = FoscamPtzController.Direction.NONE;
             swapArmed[0] = false;
         });
 
@@ -863,5 +1029,21 @@ public final class BarnWatch9000App extends Application
             }
         }
         return null;
+    }
+
+    private static FoscamPtzController.Direction resolvePtzDirection(double deltaX, double deltaY)
+    {
+        if (Math.hypot(deltaX, deltaY) < PTZ_DRAG_THRESHOLD)
+        {
+            return FoscamPtzController.Direction.NONE;
+        }
+
+        double reversedX = -deltaX;
+        double reversedY = -deltaY;
+        if (Math.abs(reversedX) >= Math.abs(reversedY))
+        {
+            return reversedX >= 0 ? FoscamPtzController.Direction.RIGHT : FoscamPtzController.Direction.LEFT;
+        }
+        return reversedY >= 0 ? FoscamPtzController.Direction.DOWN : FoscamPtzController.Direction.UP;
     }
 }

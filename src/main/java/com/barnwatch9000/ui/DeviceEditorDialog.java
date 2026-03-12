@@ -6,6 +6,7 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Dialog;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
@@ -38,6 +39,11 @@ public final class DeviceEditorDialog
         passwordField.setText(existing == null ? "" : existing.password());
         TextField subPathField = new TextField(existing == null ? "/videoSub" : existing.subPath());
         TextField mainPathField = new TextField(existing == null ? "/videoMain" : existing.mainPath());
+        CheckBox ptzCapableBox = new CheckBox("Enable PTZ drag in focused view");
+        ptzCapableBox.setSelected(existing != null && existing.ptzCapable());
+        CheckBox opticalZoomBox = new CheckBox("Enable optical zoom with Shift+Wheel");
+        opticalZoomBox.setSelected(existing != null && existing.opticalZoomCapable());
+        opticalZoomBox.disableProperty().bind(ptzCapableBox.selectedProperty().not());
 
         GridPane grid = new GridPane();
         grid.setHgap(10);
@@ -49,6 +55,8 @@ public final class DeviceEditorDialog
         grid.addRow(4, new Label("Password"), passwordField);
         grid.addRow(5, new Label("Sub path"), subPathField);
         grid.addRow(6, new Label("Main path"), mainPathField);
+        grid.addRow(7, new Label("PTZ"), ptzCapableBox);
+        grid.addRow(8, new Label("Optical zoom"), opticalZoomBox);
         dialog.getDialogPane().setContent(grid);
 
         Node saveButton = dialog.getDialogPane().lookupButton(saveButtonType);
@@ -80,6 +88,8 @@ public final class DeviceEditorDialog
                     passwordField.getText(),
                     subPathField.getText().trim(),
                     mainPathField.getText().trim(),
+                    ptzCapableBox.isSelected(),
+                    ptzCapableBox.isSelected() && opticalZoomBox.isSelected(),
                     existing == null ? nextSortOrder : existing.sortOrder());
         });
 

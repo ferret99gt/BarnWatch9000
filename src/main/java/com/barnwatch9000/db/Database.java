@@ -42,9 +42,14 @@ public final class Database
                         password TEXT NOT NULL,
                         sub_path TEXT NOT NULL,
                         main_path TEXT NOT NULL,
+                        ptz_capable INTEGER NOT NULL DEFAULT 0,
+                        optical_zoom_capable INTEGER NOT NULL DEFAULT 0,
                         sort_order INTEGER NOT NULL
                     )
                     """);
+
+            addColumnIfMissing(stmt, "camera_devices", "ptz_capable", "INTEGER NOT NULL DEFAULT 0");
+            addColumnIfMissing(stmt, "camera_devices", "optical_zoom_capable", "INTEGER NOT NULL DEFAULT 0");
 
             stmt.execute("""
                     CREATE INDEX IF NOT EXISTS idx_camera_devices_sort
@@ -69,6 +74,27 @@ public final class Database
         catch (IOException e)
         {
             throw new IllegalStateException("Failed to create data directory", e);
+        }
+    }
+
+    private static void addColumnIfMissing(Statement stmt, String tableName, String columnName, String columnDefinition) throws SQLException
+    {
+        boolean exists = false;
+        try (var rs = stmt.executeQuery("PRAGMA table_info(" + tableName + ")"))
+        {
+            while (rs.next())
+            {
+                if (columnName.equalsIgnoreCase(rs.getString("name")))
+                {
+                    exists = true;
+                    break;
+                }
+            }
+        }
+
+        if (!exists)
+        {
+            stmt.execute("ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " " + columnDefinition);
         }
     }
 }

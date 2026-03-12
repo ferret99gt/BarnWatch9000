@@ -22,7 +22,7 @@ public final class CameraDeviceRepository
     {
         List<CameraDevice> devices = new ArrayList<>();
         try (PreparedStatement ps = connection.prepareStatement("""
-                SELECT id, name, host, port, username, password, sub_path, main_path, sort_order
+                SELECT id, name, host, port, username, password, sub_path, main_path, ptz_capable, optical_zoom_capable, sort_order
                 FROM camera_devices
                 ORDER BY sort_order, name
                 """);
@@ -39,6 +39,8 @@ public final class CameraDeviceRepository
                         rs.getString("password"),
                         rs.getString("sub_path"),
                         rs.getString("main_path"),
+                        rs.getInt("ptz_capable") != 0,
+                        rs.getInt("optical_zoom_capable") != 0,
                         rs.getInt("sort_order")));
             }
         }
@@ -58,8 +60,8 @@ public final class CameraDeviceRepository
     {
         try (PreparedStatement ps = connection.prepareStatement("""
                 INSERT INTO camera_devices (
-                    id, name, host, port, username, password, sub_path, main_path, sort_order
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, name, host, port, username, password, sub_path, main_path, ptz_capable, optical_zoom_capable, sort_order
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     host = excluded.host,
@@ -68,6 +70,8 @@ public final class CameraDeviceRepository
                     password = excluded.password,
                     sub_path = excluded.sub_path,
                     main_path = excluded.main_path,
+                    ptz_capable = excluded.ptz_capable,
+                    optical_zoom_capable = excluded.optical_zoom_capable,
                     sort_order = excluded.sort_order
                 """))
         {
@@ -79,7 +83,9 @@ public final class CameraDeviceRepository
             ps.setString(6, device.password());
             ps.setString(7, device.subPath());
             ps.setString(8, device.mainPath());
-            ps.setInt(9, device.sortOrder());
+            ps.setInt(9, device.ptzCapable() ? 1 : 0);
+            ps.setInt(10, device.opticalZoomCapable() ? 1 : 0);
+            ps.setInt(11, device.sortOrder());
             ps.executeUpdate();
         }
     }

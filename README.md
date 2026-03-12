@@ -15,8 +15,14 @@ Lightweight JavaFX RTSP wall viewer for barn cameras. Developed with assistence 
 - Click-and-drag pan while zoomed
 - Drag-and-drop camera reordering with persistent saved order
 - Right-click tile menu with `Reconnect`
+- Focused PTZ controls for compatible cameras:
+  - click-and-drag pan/tilt
+  - preset dropdown with `Go`
+  - `Reset`
+  - optical `Zoom - / +`
 - Bottom overlay labels with camera name and active stream
 - Automatic VLC detection for 64-bit Windows installs
+- PTZ control is currently implemented against the Foscam CGI/API path, not a generic camera-control standard
 
 ## Requirements
 
