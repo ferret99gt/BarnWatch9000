@@ -184,14 +184,28 @@ public final class BarnWatch9000App extends Application
 
         previousPageButton = new Button("<");
         previousPageButton.setOnAction(event -> {
-            currentPage--;
-            refreshWall();
+            if (focusedDevice != null)
+            {
+                navigateFocused(-1);
+            }
+            else
+            {
+                currentPage--;
+                refreshWall();
+            }
         });
 
         nextPageButton = new Button(">");
         nextPageButton.setOnAction(event -> {
-            currentPage++;
-            refreshWall();
+            if (focusedDevice != null)
+            {
+                navigateFocused(1);
+            }
+            else
+            {
+                currentPage++;
+                refreshWall();
+            }
         });
 
         pageLabel = new Label();
@@ -456,9 +470,10 @@ public final class BarnWatch9000App extends Application
         GridPane.setVgrow(tile, Priority.ALWAYS);
         activeTiles.add(tile);
 
-        previousPageButton.setDisable(true);
-        nextPageButton.setDisable(true);
-        pageLabel.setText("Focused");
+        int focusedIndex = focusedDeviceIndex();
+        previousPageButton.setDisable(focusedIndex <= 0);
+        nextPageButton.setDisable(focusedIndex < 0 || focusedIndex >= devices.size() - 1);
+        pageLabel.setText(focusedIndex >= 0 ? "Focused " + (focusedIndex + 1) + " / " + devices.size() : "Focused");
         backToGridButton.setVisible(true);
         backToGridButton.setManaged(true);
         layoutSelect.setDisable(true);
@@ -480,6 +495,41 @@ public final class BarnWatch9000App extends Application
         layoutSelect.setValue(previousLayout);
         currentPage = previousPage;
         refreshWall();
+    }
+
+    private void navigateFocused(int delta)
+    {
+        int focusedIndex = focusedDeviceIndex();
+        if (focusedIndex < 0)
+        {
+            return;
+        }
+
+        int targetIndex = focusedIndex + delta;
+        if (targetIndex < 0 || targetIndex >= devices.size())
+        {
+            return;
+        }
+
+        focusedDevice = devices.get(targetIndex);
+        refreshWall();
+    }
+
+    private int focusedDeviceIndex()
+    {
+        if (focusedDevice == null)
+        {
+            return -1;
+        }
+
+        for (int i = 0; i < devices.size(); i++)
+        {
+            if (devices.get(i).id().equals(focusedDevice.id()))
+            {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private void updatePtzControls()
