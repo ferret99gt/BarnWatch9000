@@ -3,34 +3,59 @@ package com.barnwatch9000.player;
 import com.barnwatch9000.AppLog;
 import com.barnwatch9000.model.CameraDevice;
 import javafx.application.Platform;
-import javafx.embed.swing.SwingNode;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Label;
+import javafx.scene.image.ImageView;
+import javafx.scene.image.PixelBuffer;
+import javafx.scene.image.PixelFormat;
+import javafx.scene.image.WritableImage;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
-import uk.co.caprica.vlcj.player.component.CallbackMediaPlayerComponent;
+import uk.co.caprica.vlcj.factory.MediaPlayerFactory;
+import uk.co.caprica.vlcj.player.embedded.EmbeddedMediaPlayer;
+import uk.co.caprica.vlcj.player.embedded.videosurface.CallbackVideoSurface;
+import uk.co.caprica.vlcj.player.embedded.videosurface.callback.BufferFormat;
+import uk.co.caprica.vlcj.player.embedded.videosurface.callback.BufferFormatCallback;
+import uk.co.caprica.vlcj.player.embedded.videosurface.callback.RenderCallback;
+import uk.co.caprica.vlcj.player.embedded.videosurface.callback.format.RV32BufferFormat;
 
-import javax.swing.JPanel;
-import javax.swing.SwingUtilities;
-import java.awt.BorderLayout;
-import java.awt.event.HierarchyEvent;
-import java.awt.event.HierarchyListener;
+import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class VlcCameraTile extends StackPane
 {
+    private static final String[] FACTORY_OPTIONS = {
+            "--quiet",
+            "--no-video-title-show",
+            "--rtsp-tcp",
+            "--network-caching=3000",
+            "--no-audio",
+            "--no-drop-late-frames",
+            "--no-skip-frames",
+            "--rtsp-frame-buffer-size=5000000",
+            "--clock-jitter=0",
+            "--clock-synchro=0",
+            "--avcodec-hw=any"
+    };
+
     private final CameraDevice device;
     private final boolean mainStream;
-    private final SwingNode swingNode = new SwingNode();
     private final Region inputLayer = new Region();
+    private final ImageView imageView = new ImageView();
     private final Object playerLock = new Object();
-    private CallbackMediaPlayerComponent mediaPlayerComponent;
-    private JPanel playerPanel;
-    private HierarchyListener playerHierarchyListener;
+    private final Object frameLock = new Object();
+    private final AtomicBoolean frameUpdateScheduled = new AtomicBoolean();
+    private MediaPlayerFactory mediaPlayerFactory;
+    private EmbeddedMediaPlayer mediaPlayer;
+    private CallbackVideoSurface videoSurface;
+    private PixelBuffer<ByteBuffer> pixelBuffer;
+    private WritableImage writableImage;
+    private ByteBuffer frameBuffer;
     private boolean disposed;
     private boolean playbackStarted;
     private double zoomFactor = 1.0;
@@ -53,6 +78,11 @@ public final class VlcCameraTile extends StackPane
         clip.widthProperty().bind(widthProperty());
         clip.heightProperty().bind(heightProperty());
         setClip(clip);
+
+        imageView.setPreserveRatio(true);
+        imageView.setSmooth(true);
+        imageView.fitWidthProperty().bind(widthProperty());
+        imageView.fitHeightProperty().bind(heightProperty());
 
         Label nameLabel = new Label(device.name());
         nameLabel.setTextFill(Color.WHITE);
@@ -91,7 +121,7 @@ public final class VlcCameraTile extends StackPane
             event.consume();
         });
 
-        getChildren().addAll(swingNode, overlayLayer, inputLayer);
+        getChildren().addAll(imageView, overlayLayer, inputLayer);
 
         if (VlcSupport.ensureAvailable())
         {
@@ -125,49 +155,60 @@ public final class VlcCameraTile extends StackPane
 
     public void dispose()
     {
-        CallbackMediaPlayerComponent componentToRelease;
-        JPanel panelToClear;
-        HierarchyListener hierarchyListenerToRemove;
+        MediaPlayerFactory factoryToRelease;
+        EmbeddedMediaPlayer playerToRelease;
         synchronized (playerLock)
         {
             disposed = true;
             playbackStarted = false;
-            componentToRelease = mediaPlayerComponent;
-            mediaPlayerComponent = null;
-            panelToClear = playerPanel;
-            hierarchyListenerToRemove = playerHierarchyListener;
-            playerPanel = null;
-            playerHierarchyListener = null;
+            playerToRelease = mediaPlayer;
+            factoryToRelease = mediaPlayerFactory;
+            mediaPlayer = null;
+            mediaPlayerFactory = null;
+            videoSurface = null;
         }
 
-        Platform.runLater(() -> {
-            swingNode.setContent(null);
-            getChildren().removeIf(node -> node instanceof Label label && "VLC not found".equals(label.getText()));
+        synchronized (frameLock)
+        {
+            pixelBuffer = null;
+            writableImage = null;
+            frameBuffer = null;
+        }
 
-            SwingUtilities.invokeLater(() -> {
-                if (panelToClear != null)
-                {
-                    if (hierarchyListenerToRemove != null)
-                    {
-                        panelToClear.removeHierarchyListener(hierarchyListenerToRemove);
-                    }
-                    panelToClear.removeAll();
-                }
+        Platform.runLater(() -> imageView.setImage(null));
 
-                if (componentToRelease != null)
-                {
-                    try
-                    {
-                        componentToRelease.mediaPlayer().controls().stop();
-                    }
-                    catch (RuntimeException ex)
-                    {
-                        AppLog.error("Failed to stop VLC player during tile disposal for " + device.name(), ex);
-                    }
-                    componentToRelease.release();
-                }
-            });
-        });
+        if (playerToRelease != null)
+        {
+            try
+            {
+                playerToRelease.controls().stop();
+            }
+            catch (RuntimeException ex)
+            {
+                AppLog.error("Failed to stop VLC player during tile disposal for " + device.name(), ex);
+            }
+
+            try
+            {
+                playerToRelease.release();
+            }
+            catch (RuntimeException ex)
+            {
+                AppLog.error("Failed to release VLC media player for " + device.name(), ex);
+            }
+        }
+
+        if (factoryToRelease != null)
+        {
+            try
+            {
+                factoryToRelease.release();
+            }
+            catch (RuntimeException ex)
+            {
+                AppLog.error("Failed to release VLC media player factory for " + device.name(), ex);
+            }
+        }
     }
 
     private static double clamp(double value, double min, double max)
@@ -207,123 +248,29 @@ public final class VlcCameraTile extends StackPane
 
     public void reconnect()
     {
-        SwingUtilities.invokeLater(() -> {
-            CallbackMediaPlayerComponent component;
-            synchronized (playerLock)
-            {
-                if (disposed || mediaPlayerComponent == null)
-                {
-                    return;
-                }
-                playbackStarted = true;
-                component = mediaPlayerComponent;
-            }
-
-            try
-            {
-                component.mediaPlayer().controls().stop();
-            }
-            catch (RuntimeException ex)
-            {
-                AppLog.error("Failed to stop VLC player during reconnect for " + device.name(), ex);
-            }
-
-            try
-            {
-                component.mediaPlayer().media().play(device.streamUrl(mainStream), device.vlcOptions());
-            }
-            catch (RuntimeException ex)
-            {
-                synchronized (playerLock)
-                {
-                    playbackStarted = false;
-                }
-                AppLog.error("Failed to reconnect stream for " + device.name(), ex);
-            }
-        });
-    }
-
-    private void initializePlayerAsync()
-    {
-        SwingUtilities.invokeLater(() -> {
-            synchronized (playerLock)
-            {
-                if (disposed)
-                {
-                    return;
-                }
-                mediaPlayerComponent = new CallbackMediaPlayerComponent(
-                        "--quiet",
-                        "--no-video-title-show",
-                        "--rtsp-tcp",
-                        "--network-caching=3000",
-                        "--no-audio",
-                        "--no-drop-late-frames",
-                        "--no-skip-frames",
-                        "--rtsp-frame-buffer-size=5000000",
-                        "--clock-jitter=0",
-                        "--clock-synchro=0",
-                        "--avcodec-hw=any");
-            }
-
-            JPanel panel = new JPanel(new BorderLayout());
-            panel.add(mediaPlayerComponent, BorderLayout.CENTER);
-            HierarchyListener hierarchyListener = event -> {
-                long flags = event.getChangeFlags();
-                if ((flags & HierarchyEvent.DISPLAYABILITY_CHANGED) != 0 || (flags & HierarchyEvent.SHOWING_CHANGED) != 0)
-                {
-                    startPlaybackIfReady(panel);
-                }
-            };
-            panel.addHierarchyListener(hierarchyListener);
-
-            synchronized (playerLock)
-            {
-                if (disposed)
-                {
-                    panel.removeHierarchyListener(hierarchyListener);
-                    panel.removeAll();
-                    mediaPlayerComponent.release();
-                    mediaPlayerComponent = null;
-                    return;
-                }
-                playerPanel = panel;
-                playerHierarchyListener = hierarchyListener;
-            }
-
-            Platform.runLater(() -> {
-                synchronized (playerLock)
-                {
-                    if (disposed)
-                    {
-                        return;
-                    }
-                }
-                swingNode.setContent(panel);
-            });
-        });
-    }
-
-    private void startPlaybackIfReady(JPanel panel)
-    {
-        CallbackMediaPlayerComponent component;
+        EmbeddedMediaPlayer player;
         synchronized (playerLock)
         {
-            if (disposed || playbackStarted || mediaPlayerComponent == null)
-            {
-                return;
-            }
-            if (!panel.isDisplayable() || !panel.isShowing())
+            if (disposed || mediaPlayer == null)
             {
                 return;
             }
             playbackStarted = true;
-            component = mediaPlayerComponent;
+            player = mediaPlayer;
         }
 
         try
         {
-            component.mediaPlayer().media().play(device.streamUrl(mainStream), device.vlcOptions());
+            player.controls().stop();
+        }
+        catch (RuntimeException ex)
+        {
+            AppLog.error("Failed to stop VLC player during reconnect for " + device.name(), ex);
+        }
+
+        try
+        {
+            player.media().play(device.streamUrl(mainStream), device.vlcOptions());
         }
         catch (RuntimeException ex)
         {
@@ -331,14 +278,86 @@ public final class VlcCameraTile extends StackPane
             {
                 playbackStarted = false;
             }
-            AppLog.error("Failed to start playback for " + device.name(), ex);
+            AppLog.error("Failed to reconnect stream for " + device.name(), ex);
         }
+    }
+
+    private void initializePlayerAsync()
+    {
+        Thread.ofPlatform().name("BarnWatch-VLC-" + device.id()).daemon(true).start(() -> {
+            MediaPlayerFactory factory = new MediaPlayerFactory(FACTORY_OPTIONS);
+            EmbeddedMediaPlayer player = factory.mediaPlayers().newEmbeddedMediaPlayer();
+            CallbackVideoSurface surface = factory.videoSurfaces().newVideoSurface(new TileBufferFormatCallback(), new TileRenderCallback(), true);
+            player.videoSurface().set(surface);
+
+            synchronized (playerLock)
+            {
+                if (disposed)
+                {
+                    player.release();
+                    factory.release();
+                    return;
+                }
+                mediaPlayerFactory = factory;
+                mediaPlayer = player;
+                videoSurface = surface;
+                playbackStarted = true;
+            }
+
+            try
+            {
+                player.media().play(device.streamUrl(mainStream), device.vlcOptions());
+            }
+            catch (RuntimeException ex)
+            {
+                synchronized (playerLock)
+                {
+                    playbackStarted = false;
+                }
+                AppLog.error("Failed to start playback for " + device.name(), ex);
+            }
+        });
+    }
+
+    private void scheduleFrameUpdate()
+    {
+        if (!frameUpdateScheduled.compareAndSet(false, true))
+        {
+            return;
+        }
+
+        Platform.runLater(() -> {
+            try
+            {
+                PixelBuffer<ByteBuffer> currentPixelBuffer;
+                synchronized (frameLock)
+                {
+                    currentPixelBuffer = pixelBuffer;
+                    if (frameBuffer != null)
+                    {
+                        frameBuffer.rewind();
+                    }
+                }
+                if (!disposed && currentPixelBuffer != null)
+                {
+                    currentPixelBuffer.updateBuffer(pixelBuffer -> null);
+                }
+            }
+            catch (RuntimeException ex)
+            {
+                AppLog.error("Failed to update video frame for " + device.name(), ex);
+            }
+            finally
+            {
+                frameUpdateScheduled.set(false);
+            }
+        });
     }
 
     private void applyZoomState()
     {
-        swingNode.setScaleX(zoomFactor);
-        swingNode.setScaleY(zoomFactor);
+        imageView.setScaleX(zoomFactor);
+        imageView.setScaleY(zoomFactor);
         if (!isZoomed())
         {
             translateX = 0;
@@ -349,8 +368,8 @@ public final class VlcCameraTile extends StackPane
             translateX = clamp(translateX, -maxPanX(), maxPanX());
             translateY = clamp(translateY, -maxPanY(), maxPanY());
         }
-        swingNode.setTranslateX(translateX);
-        swingNode.setTranslateY(translateY);
+        imageView.setTranslateX(translateX);
+        imageView.setTranslateY(translateY);
     }
 
     private double maxPanX()
@@ -361,5 +380,62 @@ public final class VlcCameraTile extends StackPane
     private double maxPanY()
     {
         return Math.max(0, (getHeight() * (zoomFactor - 1.0)) / 2.0);
+    }
+
+    private final class TileBufferFormatCallback implements BufferFormatCallback
+    {
+        @Override
+        public BufferFormat getBufferFormat(int sourceWidth, int sourceHeight)
+        {
+            synchronized (frameLock)
+            {
+                frameBuffer = ByteBuffer.allocateDirect(sourceWidth * sourceHeight * 4);
+                pixelBuffer = new PixelBuffer<>(sourceWidth, sourceHeight, frameBuffer, PixelFormat.getByteBgraPreInstance());
+                writableImage = new WritableImage(pixelBuffer);
+            }
+
+            Platform.runLater(() -> {
+                if (!disposed)
+                {
+                    imageView.setImage(writableImage);
+                }
+            });
+
+            return new RV32BufferFormat(sourceWidth, sourceHeight);
+        }
+
+        @Override
+        public void allocatedBuffers(ByteBuffer[] buffers)
+        {
+            // Barn Watch uses its own JavaFX-facing frame buffer and copies only the newest frame.
+        }
+    }
+
+    private final class TileRenderCallback implements RenderCallback
+    {
+        @Override
+        public void display(uk.co.caprica.vlcj.player.base.MediaPlayer mediaPlayer, ByteBuffer[] nativeBuffers, BufferFormat bufferFormat)
+        {
+            if (disposed || nativeBuffers == null || nativeBuffers.length == 0)
+            {
+                return;
+            }
+
+            synchronized (frameLock)
+            {
+                if (frameBuffer == null)
+                {
+                    return;
+                }
+
+                ByteBuffer source = nativeBuffers[0].duplicate();
+                source.clear();
+                frameBuffer.clear();
+                frameBuffer.put(source);
+                frameBuffer.flip();
+            }
+
+            scheduleFrameUpdate();
+        }
     }
 }

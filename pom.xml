@@ -45,13 +45,6 @@
       <classifier>${javafx.platform}</classifier>
     </dependency>
     <dependency>
-      <groupId>org.openjfx</groupId>
-      <artifactId>javafx-swing</artifactId>
-      <version>${javafx.version}</version>
-      <classifier>${javafx.platform}</classifier>
-    </dependency>
-
-    <dependency>
       <groupId>org.xerial</groupId>
       <artifactId>sqlite-jdbc</artifactId>
       <version>3.46.1.0</version>
@@ -180,7 +173,6 @@
                 <module>javafx.base</module>
                 <module>javafx.controls</module>
                 <module>javafx.graphics</module>
-                <module>javafx.swing</module>
               </addModules>
               <destination>${dist.dir}</destination>
               <removeDestination>true</removeDestination>

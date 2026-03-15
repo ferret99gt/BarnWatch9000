@@ -84,6 +84,7 @@ public final class BarnWatch9000App extends Application
     private double windowedWidth;
     private double windowedHeight;
     private boolean windowedMaximized;
+    private boolean shuttingDown;
     private static final double DRAG_THRESHOLD = 6.0;
     private static final double PTZ_DRAG_THRESHOLD = 18.0;
     private final Map<Integer, javafx.scene.Node> slotTargets = new HashMap<>();
@@ -91,6 +92,7 @@ public final class BarnWatch9000App extends Application
     @Override
     public void start(Stage stage)
     {
+        Platform.setImplicitExit(false);
         primaryStage = stage;
 
         try
@@ -107,6 +109,25 @@ public final class BarnWatch9000App extends Application
             return;
         }
 
+        GridLayoutPreset initialLayout = loadInitialLayout();
+        previousLayout = initialLayout;
+        layoutSelect = null;
+        appScene = createAppScene();
+        stage.setTitle("Barn Watch 9000");
+        stage.setScene(appScene);
+        stage.setMinWidth(960);
+        stage.setMinHeight(640);
+        stage.setOnCloseRequest(event -> {
+            event.consume();
+            requestApplicationExit();
+        });
+        stage.show();
+
+        refreshWall();
+    }
+
+    private Scene createAppScene()
+    {
         BorderPane root = new BorderPane();
         root.setStyle("-fx-background-color: linear-gradient(to bottom, #191b1f, #090b0e);");
 
@@ -127,7 +148,12 @@ public final class BarnWatch9000App extends Application
         Button devicesButton = new Button("Devices");
         devicesButton.setOnAction(event -> openDeviceManager());
 
-        GridLayoutPreset initialLayout = loadInitialLayout();
+        GridLayoutPreset selectedLayout = layoutSelect == null ? previousLayout : layoutSelect.getValue();
+        if (selectedLayout == null)
+        {
+            selectedLayout = GridLayoutPreset.QUAD;
+        }
+
         layoutSelect = new ComboBox<>();
         layoutSelect.getItems().addAll(
                 GridLayoutPreset.SINGLE,
@@ -139,17 +165,16 @@ public final class BarnWatch9000App extends Application
                 GridLayoutPreset.BIG_SIX,
                 GridLayoutPreset.BIG_SEVEN,
                 GridLayoutPreset.BIG_EIGHT);
-        layoutSelect.setValue(initialLayout);
-        previousLayout = initialLayout;
+        layoutSelect.setValue(selectedLayout);
         layoutSelect.setOnAction(event -> {
-            GridLayoutPreset selectedLayout = layoutSelect.getValue();
-            if (selectedLayout == null)
+            GridLayoutPreset newLayout = layoutSelect.getValue();
+            if (newLayout == null)
             {
                 return;
             }
 
-            previousLayout = selectedLayout;
-            persistSelectedLayout(selectedLayout);
+            previousLayout = newLayout;
+            persistSelectedLayout(newLayout);
             currentPage = 0;
             if (focusedDevice == null)
             {
@@ -258,22 +283,15 @@ public final class BarnWatch9000App extends Application
         controlsBar.setAlignment(Pos.CENTER_LEFT);
         root.setBottom(controlsBar);
 
-        appScene = new Scene(root, 1280, 720, Color.BLACK);
-        appScene.setOnKeyPressed(event -> {
+        Scene scene = new Scene(root, 1280, 720, Color.BLACK);
+        scene.setOnKeyPressed(event -> {
             if (theaterMode && event.getCode() == KeyCode.ESCAPE)
             {
                 exitTheaterMode();
                 event.consume();
             }
         });
-        stage.setTitle("Barn Watch 9000");
-        stage.setScene(appScene);
-        stage.setMinWidth(960);
-        stage.setMinHeight(640);
-        stage.setOnCloseRequest(event -> shutdown());
-        stage.show();
-
-        refreshWall();
+        return scene;
     }
 
     private GridLayoutPreset loadInitialLayout()
@@ -618,6 +636,11 @@ public final class BarnWatch9000App extends Application
 
     private void shutdown()
     {
+        if (shuttingDown)
+        {
+            return;
+        }
+        shuttingDown = true;
         releaseTiles();
         if (connection != null)
         {
@@ -629,6 +652,12 @@ public final class BarnWatch9000App extends Application
             {
             }
         }
+    }
+
+    private void requestApplicationExit()
+    {
+        shutdown();
+        Platform.exit();
     }
 
     private static Region spacer()
@@ -672,6 +701,12 @@ public final class BarnWatch9000App extends Application
         launch(args);
     }
 
+    @Override
+    public void stop()
+    {
+        shutdown();
+    }
+
     private void toggleFullScreen()
     {
         if (theaterMode)
@@ -711,9 +746,9 @@ public final class BarnWatch9000App extends Application
 
         theaterMode = true;
 
+        releaseTiles();
         primaryStage.hide();
-        primaryStage.setScene(null);
-
+        appScene = createAppScene();
         theaterStage.setScene(appScene);
         theaterStage.setX(bounds.getMinX());
         theaterStage.setY(bounds.getMinY());
@@ -722,6 +757,7 @@ public final class BarnWatch9000App extends Application
         theaterStage.show();
         theaterStage.toFront();
         Platform.runLater(() -> {
+            refreshWall();
             if (appScene.getRoot() != null)
             {
                 appScene.getRoot().requestFocus();
@@ -737,19 +773,21 @@ public final class BarnWatch9000App extends Application
         }
 
         theaterMode = false;
+        releaseTiles();
         if (theaterStage != null)
         {
             theaterStage.hide();
-            theaterStage.setScene(null);
         }
 
+        appScene = createAppScene();
         primaryStage.setScene(appScene);
         primaryStage.show();
         primaryStage.setX(windowedX);
-       primaryStage.setY(windowedY);
+        primaryStage.setY(windowedY);
         primaryStage.setWidth(windowedWidth);
         primaryStage.setHeight(windowedHeight);
         primaryStage.setMaximized(windowedMaximized);
+        Platform.runLater(this::refreshWall);
     }
 
     private Stage activeStage()
@@ -1046,4 +1084,5 @@ public final class BarnWatch9000App extends Application
         }
         return reversedY >= 0 ? FoscamPtzController.Direction.DOWN : FoscamPtzController.Direction.UP;
     }
+
 }
