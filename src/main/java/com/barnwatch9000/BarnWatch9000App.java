@@ -6,6 +6,7 @@ import com.barnwatch9000.db.Database;
 import com.barnwatch9000.model.CameraDevice;
 import com.barnwatch9000.model.GridLayoutPreset;
 import com.barnwatch9000.player.VlcCameraTile;
+import com.barnwatch9000.player.VlcRuntime;
 import com.barnwatch9000.player.VlcSupport;
 import com.barnwatch9000.ptz.FoscamPtzController;
 import com.barnwatch9000.ui.DeviceManagerDialog;
@@ -55,6 +56,7 @@ public final class BarnWatch9000App extends Application
     private Connection connection;
     private CameraDeviceRepository deviceRepository;
     private AppSettingsRepository settingsRepository;
+    private VlcRuntime vlcRuntime;
 
     private Stage primaryStage;
     private Stage theaterStage;
@@ -85,6 +87,8 @@ public final class BarnWatch9000App extends Application
     private double windowedHeight;
     private boolean windowedMaximized;
     private boolean shuttingDown;
+    private CameraDevice activePtzDevice;
+    private CameraDevice activeZoomDevice;
     private static final double DRAG_THRESHOLD = 6.0;
     private static final double PTZ_DRAG_THRESHOLD = 18.0;
     private final Map<Integer, javafx.scene.Node> slotTargets = new HashMap<>();
@@ -109,6 +113,18 @@ public final class BarnWatch9000App extends Application
             return;
         }
 
+        if (VlcSupport.ensureAvailable())
+        {
+            try
+            {
+                vlcRuntime = new VlcRuntime();
+            }
+            catch (RuntimeException ex)
+            {
+                AppLog.error("Failed to initialize VLC runtime", ex);
+            }
+        }
+
         GridLayoutPreset initialLayout = loadInitialLayout();
         previousLayout = initialLayout;
         layoutSelect = null;
@@ -120,6 +136,13 @@ public final class BarnWatch9000App extends Application
         stage.setOnCloseRequest(event -> {
             event.consume();
             requestApplicationExit();
+        });
+        stage.focusedProperty().addListener((observable, wasFocused, isFocused) -> {
+            if (!isFocused)
+            {
+                stopActivePtz();
+                stopActiveZoom();
+            }
         });
         stage.show();
 
@@ -254,22 +277,12 @@ public final class BarnWatch9000App extends Application
         ptzZoomOutButton = new Button("-");
         ptzZoomOutButton.setVisible(false);
         ptzZoomOutButton.setManaged(false);
-        ptzZoomOutButton.setOnAction(event -> {
-            if (focusedDevice != null)
-            {
-                FoscamPtzController.zoom(focusedDevice, false);
-            }
-        });
+        configureZoomButton(ptzZoomOutButton, false);
 
         ptzZoomInButton = new Button("+");
         ptzZoomInButton.setVisible(false);
         ptzZoomInButton.setManaged(false);
-        ptzZoomInButton.setOnAction(event -> {
-            if (focusedDevice != null)
-            {
-                FoscamPtzController.zoom(focusedDevice, true);
-            }
-        });
+        configureZoomButton(ptzZoomInButton, true);
 
         Button fullscreenButton = new Button("Fullscreen");
         fullscreenButton.setOnAction(event -> toggleFullScreen());
@@ -298,6 +311,10 @@ public final class BarnWatch9000App extends Application
         root.setBottom(controlsBar);
 
         Scene scene = new Scene(root, 1280, 720, Color.BLACK);
+        scene.addEventFilter(MouseEvent.MOUSE_RELEASED, event -> {
+            stopActivePtz();
+            stopActiveZoom();
+        });
         scene.setOnKeyPressed(event -> {
             if (theaterMode && event.getCode() == KeyCode.ESCAPE)
             {
@@ -347,7 +364,7 @@ public final class BarnWatch9000App extends Application
     {
         try
         {
-            DeviceManagerDialog.show(primaryStage, deviceRepository, this::reloadDevices);
+            DeviceManagerDialog.show(activeStage(), deviceRepository, this::reloadDevices);
         }
         catch (SQLException ex)
         {
@@ -458,7 +475,7 @@ public final class BarnWatch9000App extends Application
         rc.setVgrow(Priority.ALWAYS);
         wallGrid.getRowConstraints().add(rc);
 
-        VlcCameraTile tile = new VlcCameraTile(focusedDevice, true);
+        VlcCameraTile tile = new VlcCameraTile(focusedDevice, true, vlcRuntime);
         configureTileInteractions(tile, 0, false, event -> {
             if (event.getClickCount() == 2)
             {
@@ -591,7 +608,7 @@ public final class BarnWatch9000App extends Application
 
     private VlcCameraTile createGridTile(CameraDevice device, int globalIndex)
     {
-        VlcCameraTile tile = new VlcCameraTile(device, false);
+        VlcCameraTile tile = new VlcCameraTile(device, false, vlcRuntime);
         configureTileInteractions(tile, globalIndex, true, event -> {
             if (event.getClickCount() == 2)
             {
@@ -677,6 +694,8 @@ public final class BarnWatch9000App extends Application
 
     private void releaseTiles()
     {
+        stopActivePtz();
+        stopActiveZoom();
         for (VlcCameraTile tile : activeTiles)
         {
             tile.dispose();
@@ -692,6 +711,11 @@ public final class BarnWatch9000App extends Application
         }
         shuttingDown = true;
         releaseTiles();
+        if (vlcRuntime != null)
+        {
+            vlcRuntime.close();
+            vlcRuntime = null;
+        }
         if (connection != null)
         {
             try
@@ -791,6 +815,13 @@ public final class BarnWatch9000App extends Application
             theaterStage.setOnCloseRequest(event -> {
                 event.consume();
                 exitTheaterMode();
+            });
+            theaterStage.focusedProperty().addListener((observable, wasFocused, isFocused) -> {
+                if (!isFocused)
+                {
+                    stopActivePtz();
+                    stopActiveZoom();
+                }
             });
         }
 
@@ -954,11 +985,11 @@ public final class BarnWatch9000App extends Application
                 {
                     if (direction == FoscamPtzController.Direction.NONE)
                     {
-                        FoscamPtzController.stop(tile.device());
+                        stopActivePtz();
                     }
                     else
                     {
-                        FoscamPtzController.move(tile.device(), direction);
+                        moveActivePtz(tile.device(), direction);
                     }
                     activePtzDirection[0] = direction;
                 }
@@ -986,9 +1017,9 @@ public final class BarnWatch9000App extends Application
             {
                 tile.endPan();
             }
-            if (ptzDragging[0] && activePtzDirection[0] != FoscamPtzController.Direction.NONE)
+            if (ptzDragging[0])
             {
-                FoscamPtzController.stop(tile.device());
+                stopActivePtz();
             }
             if (swapArmed[0] && reorderEnabled)
             {
@@ -1012,6 +1043,74 @@ public final class BarnWatch9000App extends Application
             menu.hide();
             clickHandler.handle(event);
         });
+    }
+
+    private void moveActivePtz(CameraDevice device, FoscamPtzController.Direction direction)
+    {
+        if (activePtzDevice != null && !activePtzDevice.id().equals(device.id()))
+        {
+            FoscamPtzController.stop(activePtzDevice);
+        }
+        activePtzDevice = device;
+        FoscamPtzController.move(device, direction);
+    }
+
+    private void stopActivePtz()
+    {
+        CameraDevice device = activePtzDevice;
+        activePtzDevice = null;
+        if (device != null)
+        {
+            FoscamPtzController.stop(device);
+        }
+    }
+
+    private void configureZoomButton(Button button, boolean zoomIn)
+    {
+        button.setOnMousePressed(event -> {
+            if (event.getButton() == MouseButton.PRIMARY)
+            {
+                startActiveZoom(zoomIn);
+            }
+        });
+        button.setOnMouseReleased(event -> stopActiveZoom());
+        button.setOnKeyPressed(event -> {
+            if (event.getCode() == KeyCode.SPACE || event.getCode() == KeyCode.ENTER)
+            {
+                startActiveZoom(zoomIn);
+            }
+        });
+        button.setOnKeyReleased(event -> {
+            if (event.getCode() == KeyCode.SPACE || event.getCode() == KeyCode.ENTER)
+            {
+                stopActiveZoom();
+            }
+        });
+    }
+
+    private void startActiveZoom(boolean zoomIn)
+    {
+        CameraDevice device = focusedDevice;
+        if (device == null || !device.opticalZoomCapable())
+        {
+            return;
+        }
+        if (activeZoomDevice != null && !activeZoomDevice.id().equals(device.id()))
+        {
+            FoscamPtzController.stopZoom(activeZoomDevice);
+        }
+        activeZoomDevice = device;
+        FoscamPtzController.startZoom(device, zoomIn);
+    }
+
+    private void stopActiveZoom()
+    {
+        CameraDevice device = activeZoomDevice;
+        activeZoomDevice = null;
+        if (device != null)
+        {
+            FoscamPtzController.stopZoom(device);
+        }
     }
 
     private void relayoutVisiblePageWithoutReconnect()

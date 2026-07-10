@@ -1,6 +1,6 @@
 # Barn Watch 9000
 
-Lightweight JavaFX RTSP wall viewer for barn cameras. Developed with assistence from GPT-5.4.
+Lightweight JavaFX RTSP wall viewer for barn cameras. Developed with assistance from Codex using GPT-5.4 and later models.
 
 ## Current Scope
 

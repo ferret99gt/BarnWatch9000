@@ -41,7 +41,7 @@ public final class DeviceEditorDialog
         TextField mainPathField = new TextField(existing == null ? "/videoMain" : existing.mainPath());
         CheckBox ptzCapableBox = new CheckBox("Enable PTZ drag in focused view");
         ptzCapableBox.setSelected(existing != null && existing.ptzCapable());
-        CheckBox opticalZoomBox = new CheckBox("Enable optical zoom with Shift+Wheel");
+        CheckBox opticalZoomBox = new CheckBox("Enable optical zoom controls in focused view");
         opticalZoomBox.setSelected(existing != null && existing.opticalZoomCapable());
         opticalZoomBox.disableProperty().bind(ptzCapableBox.selectedProperty().not());
 

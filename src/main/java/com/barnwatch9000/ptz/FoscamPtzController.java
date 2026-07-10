@@ -14,13 +14,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -29,8 +25,7 @@ public final class FoscamPtzController
     private static final Pattern XML_NAME_PATTERN = Pattern.compile("<name>([^<]+)</name>", Pattern.CASE_INSENSITIVE);
     private static final Pattern XML_POINT_PATTERN = Pattern.compile("<point\\d+>([^<]*)</point\\d+>", Pattern.CASE_INSENSITIVE);
     private static final Pattern JSON_NAME_PATTERN = Pattern.compile("\"name\"\\s*:\\s*\"([^\"]+)\"", Pattern.CASE_INSENSITIVE);
-    private static final ScheduledExecutorService EXECUTOR = Executors.newSingleThreadScheduledExecutor(new PtzThreadFactory());
-    private static final ConcurrentMap<String, ScheduledFuture<?>> ZOOM_STOPS = new ConcurrentHashMap<>();
+    private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor(new PtzThreadFactory());
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .executor(EXECUTOR)
             .connectTimeout(Duration.ofSeconds(2))
@@ -67,25 +62,22 @@ public final class FoscamPtzController
         send(device, "ptzReset");
     }
 
-    public static void zoom(CameraDevice device, boolean zoomIn)
+    public static void startZoom(CameraDevice device, boolean zoomIn)
     {
         if (!device.opticalZoomCapable())
         {
             return;
         }
-
         send(device, zoomIn ? "zoomIn" : "zoomOut");
-        ScheduledFuture<?> previousStop = ZOOM_STOPS.remove(device.id());
-        if (previousStop != null)
-        {
-            previousStop.cancel(false);
-        }
+    }
 
-        ScheduledFuture<?> stopTask = EXECUTOR.schedule(() -> {
-            send(device, "zoomStop");
-            ZOOM_STOPS.remove(device.id());
-        }, 900, TimeUnit.MILLISECONDS);
-        ZOOM_STOPS.put(device.id(), stopTask);
+    public static void stopZoom(CameraDevice device)
+    {
+        if (!device.opticalZoomCapable())
+        {
+            return;
+        }
+        send(device, "zoomStop");
     }
 
     public static CompletableFuture<List<String>> fetchPresets(CameraDevice device)
@@ -179,7 +171,7 @@ public final class FoscamPtzController
                 });
     }
 
-    private static List<String> parsePresetNames(String body)
+    static List<String> parsePresetNames(String body)
     {
         if (body == null || body.isBlank())
         {

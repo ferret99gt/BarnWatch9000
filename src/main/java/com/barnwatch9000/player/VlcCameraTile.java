@@ -16,7 +16,6 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
-import uk.co.caprica.vlcj.factory.MediaPlayerFactory;
 import uk.co.caprica.vlcj.player.embedded.EmbeddedMediaPlayer;
 import uk.co.caprica.vlcj.player.embedded.videosurface.CallbackVideoSurface;
 import uk.co.caprica.vlcj.player.embedded.videosurface.callback.BufferFormat;
@@ -29,35 +28,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class VlcCameraTile extends StackPane
 {
-    private static final String[] FACTORY_OPTIONS = {
-            "--quiet",
-            "--no-video-title-show",
-            "--rtsp-tcp",
-            "--network-caching=3000",
-            "--no-audio",
-            "--no-drop-late-frames",
-            "--no-skip-frames",
-            "--rtsp-frame-buffer-size=5000000",
-            "--clock-jitter=0",
-            "--clock-synchro=0",
-            "--avcodec-hw=any"
-    };
-
     private final CameraDevice device;
     private final boolean mainStream;
+    private final VlcRuntime vlcRuntime;
     private final Region inputLayer = new Region();
     private final ImageView imageView = new ImageView();
-    private final Object playerLock = new Object();
     private final Object frameLock = new Object();
+    private final AtomicBoolean disposed = new AtomicBoolean();
     private final AtomicBoolean frameUpdateScheduled = new AtomicBoolean();
-    private MediaPlayerFactory mediaPlayerFactory;
     private EmbeddedMediaPlayer mediaPlayer;
     private CallbackVideoSurface videoSurface;
-    private PixelBuffer<ByteBuffer> pixelBuffer;
-    private WritableImage writableImage;
-    private ByteBuffer frameBuffer;
-    private boolean disposed;
-    private boolean playbackStarted;
+    private FrameState frameState;
     private double zoomFactor = 1.0;
     private double translateX;
     private double translateY;
@@ -66,10 +47,11 @@ public final class VlcCameraTile extends StackPane
     private double panAnchorTranslateX;
     private double panAnchorTranslateY;
 
-    public VlcCameraTile(CameraDevice device, boolean mainStream)
+    public VlcCameraTile(CameraDevice device, boolean mainStream, VlcRuntime vlcRuntime)
     {
         this.device = device;
         this.mainStream = mainStream;
+        this.vlcRuntime = vlcRuntime;
 
         setStyle("-fx-background-color: #080808; -fx-border-color: rgba(255,255,255,0.12); -fx-border-width: 1;");
         setMinSize(120, 90);
@@ -123,7 +105,7 @@ public final class VlcCameraTile extends StackPane
 
         getChildren().addAll(imageView, overlayLayer, inputLayer);
 
-        if (VlcSupport.ensureAvailable())
+        if (vlcRuntime != null)
         {
             initializePlayerAsync();
         }
@@ -155,59 +137,20 @@ public final class VlcCameraTile extends StackPane
 
     public void dispose()
     {
-        MediaPlayerFactory factoryToRelease;
-        EmbeddedMediaPlayer playerToRelease;
-        synchronized (playerLock)
+        if (!disposed.compareAndSet(false, true))
         {
-            disposed = true;
-            playbackStarted = false;
-            playerToRelease = mediaPlayer;
-            factoryToRelease = mediaPlayerFactory;
-            mediaPlayer = null;
-            mediaPlayerFactory = null;
-            videoSurface = null;
+            return;
         }
 
+        imageView.setImage(null);
         synchronized (frameLock)
         {
-            pixelBuffer = null;
-            writableImage = null;
-            frameBuffer = null;
+            frameState = null;
         }
 
-        Platform.runLater(() -> imageView.setImage(null));
-
-        if (playerToRelease != null)
+        if (vlcRuntime != null)
         {
-            try
-            {
-                playerToRelease.controls().stop();
-            }
-            catch (RuntimeException ex)
-            {
-                AppLog.error("Failed to stop VLC player during tile disposal for " + device.name(), ex);
-            }
-
-            try
-            {
-                playerToRelease.release();
-            }
-            catch (RuntimeException ex)
-            {
-                AppLog.error("Failed to release VLC media player for " + device.name(), ex);
-            }
-        }
-
-        if (factoryToRelease != null)
-        {
-            try
-            {
-                factoryToRelease.release();
-            }
-            catch (RuntimeException ex)
-            {
-                AppLog.error("Failed to release VLC media player factory for " + device.name(), ex);
-            }
+            vlcRuntime.execute("release player for " + device.name(), this::releasePlayer);
         }
     }
 
@@ -248,110 +191,160 @@ public final class VlcCameraTile extends StackPane
 
     public void reconnect()
     {
-        EmbeddedMediaPlayer player;
-        synchronized (playerLock)
-        {
-            if (disposed || mediaPlayer == null)
-            {
-                return;
-            }
-            playbackStarted = true;
-            player = mediaPlayer;
-        }
-
-        try
-        {
-            player.controls().stop();
-        }
-        catch (RuntimeException ex)
-        {
-            AppLog.error("Failed to stop VLC player during reconnect for " + device.name(), ex);
-        }
-
-        try
-        {
-            player.media().play(device.streamUrl(mainStream), device.vlcOptions());
-        }
-        catch (RuntimeException ex)
-        {
-            synchronized (playerLock)
-            {
-                playbackStarted = false;
-            }
-            AppLog.error("Failed to reconnect stream for " + device.name(), ex);
-        }
-    }
-
-    private void initializePlayerAsync()
-    {
-        Thread.ofPlatform().name("BarnWatch-VLC-" + device.id()).daemon(true).start(() -> {
-            MediaPlayerFactory factory = new MediaPlayerFactory(FACTORY_OPTIONS);
-            EmbeddedMediaPlayer player = factory.mediaPlayers().newEmbeddedMediaPlayer();
-            CallbackVideoSurface surface = factory.videoSurfaces().newVideoSurface(new TileBufferFormatCallback(), new TileRenderCallback(), true);
-            player.videoSurface().set(surface);
-
-            synchronized (playerLock)
-            {
-                if (disposed)
-                {
-                    player.release();
-                    factory.release();
-                    return;
-                }
-                mediaPlayerFactory = factory;
-                mediaPlayer = player;
-                videoSurface = surface;
-                playbackStarted = true;
-            }
-
-            try
-            {
-                player.media().play(device.streamUrl(mainStream), device.vlcOptions());
-            }
-            catch (RuntimeException ex)
-            {
-                synchronized (playerLock)
-                {
-                    playbackStarted = false;
-                }
-                AppLog.error("Failed to start playback for " + device.name(), ex);
-            }
-        });
-    }
-
-    private void scheduleFrameUpdate()
-    {
-        if (!frameUpdateScheduled.compareAndSet(false, true))
+        if (disposed.get() || vlcRuntime == null)
         {
             return;
         }
 
-        Platform.runLater(() -> {
+        vlcRuntime.execute("reconnect " + device.name(), () -> {
+            if (disposed.get() || mediaPlayer == null)
+            {
+                return;
+            }
+
             try
             {
-                PixelBuffer<ByteBuffer> currentPixelBuffer;
-                synchronized (frameLock)
-                {
-                    currentPixelBuffer = pixelBuffer;
-                    if (frameBuffer != null)
-                    {
-                        frameBuffer.rewind();
-                    }
-                }
-                if (!disposed && currentPixelBuffer != null)
-                {
-                    currentPixelBuffer.updateBuffer(pixelBuffer -> null);
-                }
+                mediaPlayer.controls().stop();
             }
             catch (RuntimeException ex)
             {
-                AppLog.error("Failed to update video frame for " + device.name(), ex);
+                AppLog.error("Failed to stop VLC player during reconnect for " + device.name(), ex);
+            }
+            mediaPlayer.media().play(device.streamUrl(mainStream), device.vlcOptions());
+        });
+    }
+
+    private void initializePlayerAsync()
+    {
+        vlcRuntime.execute("initialize player for " + device.name(), () -> {
+            if (disposed.get())
+            {
+                return;
+            }
+
+            EmbeddedMediaPlayer newPlayer = vlcRuntime.newMediaPlayer();
+            boolean retained = false;
+            try
+            {
+                CallbackVideoSurface newSurface = vlcRuntime.newVideoSurface(
+                        new TileBufferFormatCallback(),
+                        new TileRenderCallback());
+                newPlayer.videoSurface().set(newSurface);
+
+                if (disposed.get())
+                {
+                    return;
+                }
+
+                mediaPlayer = newPlayer;
+                videoSurface = newSurface;
+                retained = true;
+                newPlayer.media().play(device.streamUrl(mainStream), device.vlcOptions());
             }
             finally
             {
-                frameUpdateScheduled.set(false);
+                if (!retained)
+                {
+                    newPlayer.release();
+                }
             }
         });
+    }
+
+    private void releasePlayer()
+    {
+        EmbeddedMediaPlayer playerToRelease = mediaPlayer;
+        mediaPlayer = null;
+        videoSurface = null;
+        if (playerToRelease == null)
+        {
+            return;
+        }
+
+        try
+        {
+            playerToRelease.controls().stop();
+        }
+        catch (RuntimeException ex)
+        {
+            AppLog.error("Failed to stop VLC player during tile disposal for " + device.name(), ex);
+        }
+        finally
+        {
+            playerToRelease.release();
+        }
+    }
+
+    private void scheduleFrameUpdate()
+    {
+        if (disposed.get() || !frameUpdateScheduled.compareAndSet(false, true))
+        {
+            return;
+        }
+
+        Platform.runLater(this::publishLatestFrame);
+    }
+
+    private void publishLatestFrame()
+    {
+        try
+        {
+            FrameState state;
+            synchronized (frameLock)
+            {
+                state = frameState;
+            }
+
+            if (!disposed.get() && state != null)
+            {
+                state.pixelBuffer.updateBuffer(pixelBuffer -> {
+                    synchronized (frameLock)
+                    {
+                        if (disposed.get() || frameState != state)
+                        {
+                            return null;
+                        }
+
+                        state.displayBuffer.clear();
+                        ByteBuffer newestFrame = state.latestFrame.duplicate();
+                        newestFrame.rewind();
+                        state.displayBuffer.put(newestFrame);
+                        state.displayBuffer.rewind();
+                        state.displayedSequence = state.latestSequence;
+                        return null;
+                    }
+                });
+            }
+        }
+        catch (RuntimeException ex)
+        {
+            AppLog.error("Failed to update video frame for " + device.name(), ex);
+            synchronized (frameLock)
+            {
+                if (frameState != null)
+                {
+                    frameState.displayedSequence = frameState.latestSequence;
+                }
+            }
+        }
+        finally
+        {
+            frameUpdateScheduled.set(false);
+            if (hasUnpublishedFrame())
+            {
+                scheduleFrameUpdate();
+            }
+        }
+    }
+
+    private boolean hasUnpublishedFrame()
+    {
+        synchronized (frameLock)
+        {
+            return !disposed.get()
+                    && frameState != null
+                    && frameState.latestSequence != frameState.displayedSequence;
+        }
     }
 
     private void applyZoomState()
@@ -387,27 +380,33 @@ public final class VlcCameraTile extends StackPane
         @Override
         public BufferFormat getBufferFormat(int sourceWidth, int sourceHeight)
         {
+            int frameSize = Math.multiplyExact(Math.multiplyExact(sourceWidth, sourceHeight), 4);
+            FrameState newState = new FrameState(sourceWidth, sourceHeight, frameSize);
             synchronized (frameLock)
             {
-                frameBuffer = ByteBuffer.allocateDirect(sourceWidth * sourceHeight * 4);
-                pixelBuffer = new PixelBuffer<>(sourceWidth, sourceHeight, frameBuffer, PixelFormat.getByteBgraPreInstance());
-                writableImage = new WritableImage(pixelBuffer);
+                if (disposed.get())
+                {
+                    return new RV32BufferFormat(sourceWidth, sourceHeight);
+                }
+                frameState = newState;
             }
 
             Platform.runLater(() -> {
-                if (!disposed)
+                synchronized (frameLock)
                 {
-                    imageView.setImage(writableImage);
+                    if (!disposed.get() && frameState == newState)
+                    {
+                        imageView.setImage(newState.image);
+                    }
                 }
             });
-
             return new RV32BufferFormat(sourceWidth, sourceHeight);
         }
 
         @Override
         public void allocatedBuffers(ByteBuffer[] buffers)
         {
-            // Barn Watch uses its own JavaFX-facing frame buffer and copies only the newest frame.
+            // LibVLC owns these buffers; the render callback copies only the newest frame into staging memory.
         }
     }
 
@@ -416,26 +415,52 @@ public final class VlcCameraTile extends StackPane
         @Override
         public void display(uk.co.caprica.vlcj.player.base.MediaPlayer mediaPlayer, ByteBuffer[] nativeBuffers, BufferFormat bufferFormat)
         {
-            if (disposed || nativeBuffers == null || nativeBuffers.length == 0)
+            if (disposed.get() || nativeBuffers == null || nativeBuffers.length == 0)
             {
                 return;
             }
 
             synchronized (frameLock)
             {
-                if (frameBuffer == null)
+                FrameState state = frameState;
+                if (state == null)
                 {
                     return;
                 }
 
                 ByteBuffer source = nativeBuffers[0].duplicate();
                 source.clear();
-                frameBuffer.clear();
-                frameBuffer.put(source);
-                frameBuffer.flip();
+                if (source.remaining() < state.frameSize)
+                {
+                    return;
+                }
+                source.limit(state.frameSize);
+                state.latestFrame.clear();
+                state.latestFrame.put(source);
+                state.latestFrame.rewind();
+                state.latestSequence++;
             }
-
             scheduleFrameUpdate();
+        }
+    }
+
+    private static final class FrameState
+    {
+        private final int frameSize;
+        private final ByteBuffer latestFrame;
+        private final ByteBuffer displayBuffer;
+        private final PixelBuffer<ByteBuffer> pixelBuffer;
+        private final WritableImage image;
+        private long latestSequence;
+        private long displayedSequence;
+
+        private FrameState(int width, int height, int frameSize)
+        {
+            this.frameSize = frameSize;
+            latestFrame = ByteBuffer.allocateDirect(frameSize);
+            displayBuffer = ByteBuffer.allocateDirect(frameSize);
+            pixelBuffer = new PixelBuffer<>(width, height, displayBuffer, PixelFormat.getByteBgraPreInstance());
+            image = new WritableImage(pixelBuffer);
         }
     }
 }
