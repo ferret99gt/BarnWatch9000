@@ -11,6 +11,7 @@ import java.sql.Statement;
 public final class Database
 {
     private static final String DATA_DIR = "data";
+    private static final String DATA_DIR_ENV = "BARNWATCH9000_DATA_DIR";
     private static final String DB_FILE = "barnwatch9000.db";
 
     private Database()
@@ -19,8 +20,19 @@ public final class Database
 
     public static Connection open() throws SQLException
     {
-        ensureDataDir();
-        Connection connection = DriverManager.getConnection("jdbc:sqlite:./" + DATA_DIR + "/" + DB_FILE);
+        String configuredDirectory = System.getenv(DATA_DIR_ENV);
+        Path dataDirectory = configuredDirectory == null || configuredDirectory.isBlank()
+                ? Path.of(DATA_DIR)
+                : Path.of(configuredDirectory);
+        return open(dataDirectory);
+    }
+
+    static Connection open(Path dataDirectory) throws SQLException
+    {
+        Path normalizedDirectory = dataDirectory.toAbsolutePath().normalize();
+        ensureDataDir(normalizedDirectory);
+        Path databasePath = normalizedDirectory.resolve(DB_FILE);
+        Connection connection = DriverManager.getConnection("jdbc:sqlite:" + databasePath);
         try (Statement stmt = connection.createStatement())
         {
             stmt.execute("PRAGMA foreign_keys = ON");
@@ -65,11 +77,11 @@ public final class Database
         }
     }
 
-    private static void ensureDataDir()
+    private static void ensureDataDir(Path dataDirectory)
     {
         try
         {
-            Files.createDirectories(Path.of(DATA_DIR));
+            Files.createDirectories(dataDirectory);
         }
         catch (IOException e)
         {

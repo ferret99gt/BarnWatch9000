@@ -404,6 +404,12 @@ public final class VlcCameraTile extends StackPane
         }
 
         @Override
+        public void newFormatSize(int bufferWidth, int bufferHeight, int displayWidth, int displayHeight)
+        {
+            // The frame state is replaced by getBufferFormat immediately before VLCJ reports these dimensions.
+        }
+
+        @Override
         public void allocatedBuffers(ByteBuffer[] buffers)
         {
             // LibVLC owns these buffers; the render callback copies only the newest frame into staging memory.
@@ -413,7 +419,18 @@ public final class VlcCameraTile extends StackPane
     private final class TileRenderCallback implements RenderCallback
     {
         @Override
-        public void display(uk.co.caprica.vlcj.player.base.MediaPlayer mediaPlayer, ByteBuffer[] nativeBuffers, BufferFormat bufferFormat)
+        public void lock(uk.co.caprica.vlcj.player.base.MediaPlayer mediaPlayer)
+        {
+            // VLCJ owns and locks the native buffers; display copies a frame while that lock is held.
+        }
+
+        @Override
+        public void display(
+                uk.co.caprica.vlcj.player.base.MediaPlayer mediaPlayer,
+                ByteBuffer[] nativeBuffers,
+                BufferFormat bufferFormat,
+                int displayWidth,
+                int displayHeight)
         {
             if (disposed.get() || nativeBuffers == null || nativeBuffers.length == 0)
             {
@@ -441,6 +458,12 @@ public final class VlcCameraTile extends StackPane
                 state.latestSequence++;
             }
             scheduleFrameUpdate();
+        }
+
+        @Override
+        public void unlock(uk.co.caprica.vlcj.player.base.MediaPlayer mediaPlayer)
+        {
+            // No application lock is retained after display returns.
         }
     }
 

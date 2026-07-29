@@ -2,6 +2,8 @@
 
 Lightweight JavaFX RTSP wall viewer for barn cameras. Developed with assistance from Codex using GPT-5.4 and later models.
 
+Current release: **0.2.0**
+
 ## Current Scope
 
 - SQLite-backed camera device list
@@ -26,7 +28,7 @@ Lightweight JavaFX RTSP wall viewer for barn cameras. Developed with assistance 
 
 ## Requirements
 
-- JDK 25
+- Microsoft OpenJDK 25.0.4 or another compatible JDK 25.0.4+ build
 - Maven 3.9+
 - VLC installed on Windows, 64-bit
 
@@ -39,16 +41,27 @@ mvn javafx:run
 ## Build
 
 ```bash
-mvn -DskipTests package
+mvn clean verify
 ```
 
-## Release App Image
+## Release Bundle
 
-```bash
-mvn -DskipTests -Prelease package
+```powershell
+./scripts/package-release.ps1
 ```
 
-The packaged app image is written under `target/dist`.
+The Windows app image is written under `target/dist`. The distributable ZIP and its SHA-256
+checksum are written under `target/release`.
+
+The app image includes its own Java 25.0.4 runtime. VLC is not bundled; playback still requires
+a separate 64-bit VLC installation.
+
+Run the complete clean-build, unit-test, packaging, runtime, launcher, and archive verification
+with:
+
+```powershell
+./scripts/verify.ps1
+```
 
 ## License
 

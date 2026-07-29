@@ -129,7 +129,7 @@ public final class BarnWatch9000App extends Application
         previousLayout = initialLayout;
         layoutSelect = null;
         appScene = createAppScene();
-        stage.setTitle("Barn Watch 9000");
+        stage.setTitle(AppVersion.displayName());
         stage.setScene(appScene);
         stage.setMinWidth(960);
         stage.setMinHeight(640);
@@ -772,7 +772,29 @@ public final class BarnWatch9000App extends Application
     public static void main(String[] args)
     {
         AppLog.installGlobalHandler();
+        if (args.length == 1 && "--smoke-test".equals(args[0]))
+        {
+            int exitCode = runSmokeTest();
+            // A jpackage launcher initializes JavaFX for an Application subclass before invoking main.
+            // Force that runtime down after the non-UI smoke path.
+            System.exit(exitCode);
+            return;
+        }
         launch(args);
+    }
+
+    private static int runSmokeTest()
+    {
+        try (Connection smokeConnection = Database.open())
+        {
+            Database.initialize(smokeConnection);
+            return 0;
+        }
+        catch (SQLException ex)
+        {
+            AppLog.error("BarnWatch9000 smoke test failed", ex);
+            return 1;
+        }
     }
 
     @Override
